@@ -463,9 +463,14 @@
                 html += '</div>';
               }
               
-              html += '</td><td>' + (s.quantity || 1) + ' ' + s.unit + '</td>';
-              html += '<td class="price-purchase">€' + (svcCost).toFixed(2) + '</td>';
-              html += '<td class="price-sale">€' + (svcSale).toFixed(2) + '</td></tr>';
+              // Calculate individual service price
+              const svcQty = s.quantity || 1;
+              const svcPurchase = (s.purchasePrice || 0) * svcQty;
+              const svcSalePrice = (s.salePrice || 0) * svcQty;
+              
+              html += '</td><td>' + svcQty + ' ' + s.unit + '</td>';
+              html += '<td class="price-purchase">€' + svcPurchase.toFixed(2) + '</td>';
+              html += '<td class="price-sale">€' + svcSalePrice.toFixed(2) + '</td></tr>';
             });
             
             html += '</tbody></table>';
