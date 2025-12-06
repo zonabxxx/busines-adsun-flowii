@@ -283,14 +283,17 @@ app.get('/api/products', async (req, res) => {
             const svc = svcResult.rows[0];
             const entityId = svc.entityId;
             
-            // Get workflow
-            const workflow = await client.execute(`
-              SELECT sc.*, tt.name as task_name
-              FROM service_checklists sc
-              LEFT JOIN task_templates tt ON sc.task_template_id = tt.id
-              WHERE sc.service_entity_id = ${entityId}
-              ORDER BY sc."order"
-            `);
+            let workflow = { rows: [] };
+            if (entityId) {
+              // Get workflow - entityId is integer
+              workflow = await client.execute(`
+                SELECT sc.*, tt.name as task_name
+                FROM service_checklists sc
+                LEFT JOIN task_templates tt ON sc.task_template_id = tt.id
+                WHERE sc.service_entity_id = ${Number(entityId)}
+                ORDER BY sc."order"
+              `);
+            }
             
             services.push({
               ...svc,
