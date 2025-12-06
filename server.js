@@ -43,7 +43,22 @@ app.get('/health', async (req, res) => {
       });
     }
     const result = await client.execute('SELECT 1 as test');
-    res.json({ status: 'ok', db: 'connected', result: result.rows });
+    
+    // Test specific variant
+    const testVariant = '463694a1-b99a-456f-b35c-adb5cb6989e7';
+    const pvmTest = await client.execute('SELECT * FROM product_variant_materials WHERE variant_id = ?', [testVariant]);
+    const pvsTest = await client.execute('SELECT * FROM product_variant_services WHERE variant_id = ?', [testVariant]);
+    
+    res.json({ 
+      status: 'ok', 
+      db: 'connected', 
+      result: result.rows,
+      testVariant,
+      pvmCount: pvmTest.rows.length,
+      pvmRows: pvmTest.rows,
+      pvsCount: pvsTest.rows.length,
+      pvsRows: pvsTest.rows
+    });
   } catch (error) {
     res.status(500).json({ 
       status: 'error', 
