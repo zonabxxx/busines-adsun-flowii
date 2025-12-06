@@ -44,10 +44,18 @@ app.get('/health', async (req, res) => {
     }
     const result = await client.execute('SELECT 1 as test');
     
-    // Test specific variant
+    // Test specific variant - try different approaches
     const testVariant = '463694a1-b99a-456f-b35c-adb5cb6989e7';
+    
+    // Approach 1: parameterized
     const pvmTest = await client.execute('SELECT * FROM product_variant_materials WHERE variant_id = ?', [testVariant]);
     const pvsTest = await client.execute('SELECT * FROM product_variant_services WHERE variant_id = ?', [testVariant]);
+    
+    // Approach 2: raw SQL (no params)
+    const pvmRaw = await client.execute(`SELECT * FROM product_variant_materials WHERE variant_id = '463694a1-b99a-456f-b35c-adb5cb6989e7'`);
+    
+    // Approach 3: LIKE
+    const pvmLike = await client.execute(`SELECT * FROM product_variant_materials WHERE variant_id LIKE '%463694a1%'`);
     
     // Count total records in tables
     const pvmTotal = await client.execute('SELECT COUNT(*) as cnt FROM product_variant_materials');
@@ -56,6 +64,9 @@ app.get('/health', async (req, res) => {
     
     // Get sample variant IDs from pvm
     const samplePvm = await client.execute('SELECT DISTINCT variant_id FROM product_variant_materials LIMIT 5');
+    
+    // Get ALL variant IDs from pvm (not just sample)
+    const allPvm = await client.execute('SELECT DISTINCT variant_id FROM product_variant_materials');
     
     res.json({ 
       status: 'ok', 
@@ -66,13 +77,14 @@ app.get('/health', async (req, res) => {
       pvmCount: pvmTest.rows.length,
       pvmRows: pvmTest.rows,
       pvsCount: pvsTest.rows.length,
-      pvsRows: pvsTest.rows,
+      pvmRawCount: pvmRaw.rows.length,
+      pvmLikeCount: pvmLike.rows.length,
       totals: {
         pvm: pvmTotal.rows[0]?.cnt || 0,
         pvs: pvsTotal.rows[0]?.cnt || 0,
         materials: matsTotal.rows[0]?.cnt || 0
       },
-      sampleVariantIds: samplePvm.rows.map(r => r.variant_id)
+      allVariantIds: allPvm.rows.map(r => r.variant_id)
     });
   } catch (error) {
     res.status(500).json({ 
