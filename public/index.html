@@ -23,6 +23,21 @@
       -webkit-text-fill-color: transparent;
     }
     .subtitle { text-align: center; color: #a1a1aa; margin-bottom: 1rem; }
+    .nav-links { text-align: center; margin-bottom: 1.5rem; }
+    .nav-links a {
+      display: inline-block;
+      padding: 0.5rem 1.5rem;
+      background: rgba(139, 92, 246, 0.2);
+      border: 1px solid rgba(139, 92, 246, 0.4);
+      border-radius: 8px;
+      color: #c4b5fd;
+      text-decoration: none;
+      transition: all 0.3s;
+    }
+    .nav-links a:hover {
+      background: rgba(139, 92, 246, 0.4);
+      transform: translateY(-2px);
+    }
     .loading { text-align: center; padding: 4rem; color: #a1a1aa; }
     .loading-spinner {
       width: 50px; height: 50px;
@@ -284,6 +299,10 @@
   <div class="container">
     <h1>✏️ Cenotvorba produktov</h1>
     <p class="subtitle">Kliknite na časy pre úpravu • Zmeny sa ukladajú do databázy</p>
+    
+    <div class="nav-links">
+      <a href="/feedback">📋 Zobraziť pripomienky a zmeny</a>
+    </div>
     
     <div class="author-section">
       <div>
