@@ -187,6 +187,8 @@ app.get('/api/products', async (req, res) => {
       const enrichedVariants = [];
       
       for (const v of variants) {
+        console.log(`Processing variant: ${v.id} - ${v.name}`);
+        
         // Get materials
         const materialsResult = await client.execute(`
           SELECT pvm.*, m.name, m.unit, m.purchase_price, m.sale_price
@@ -194,11 +196,13 @@ app.get('/api/products', async (req, res) => {
           JOIN materials m ON pvm.material_id = m.id
           WHERE pvm.variant_id = ?
         `, [v.id]);
+        console.log(`  Materials found: ${materialsResult.rows.length}`);
         
         // Get services
         const servicesResult = await client.execute(`
           SELECT pvs.* FROM product_variant_services pvs WHERE pvs.variant_id = ?
         `, [v.id]);
+        console.log(`  Services found: ${servicesResult.rows.length}`);
         
         const services = [];
         for (const s of servicesResult.rows) {
