@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cenotvorba produktov - Editovateľný prehľad</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #0c0c1d 0%, #1a1a3e 50%, #0d1f3c 100%);
+      min-height: 100vh;
+      color: #e4e4e7;
+      padding: 2rem;
+    }
+    .container { max-width: 1600px; margin: 0 auto; }
+    h1 {
+      text-align: center;
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(90deg, #f59e0b, #ef4444, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { text-align: center; color: #a1a1aa; margin-bottom: 1rem; }
+    .loading { text-align: center; padding: 4rem; color: #a1a1aa; }
+    .loading-spinner {
+      width: 50px; height: 50px;
+      border: 4px solid rgba(139, 92, 246, 0.2);
+      border-top-color: #8b5cf6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    .author-section {
+      background: rgba(139, 92, 246, 0.1);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 2rem;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .author-section label { color: #a1a1aa; }
+    .author-section input {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      padding: 0.5rem 1rem;
+      color: #fff;
+      width: 200px;
+    }
+    
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, #fbbf24, #f87171);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .stat-label { color: #a1a1aa; margin-top: 0.25rem; font-size: 0.9rem; }
+    
+    .product-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      margin-bottom: 2rem;
+      overflow: hidden;
+    }
+    .product-header {
+      background: linear-gradient(90deg, rgba(249, 115, 22, 0.2), rgba(139, 92, 246, 0.15));
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .product-name { font-size: 1.5rem; font-weight: 700; color: #fbbf24; }
+    
+    .add-comment-btn {
+      background: rgba(139, 92, 246, 0.2);
+      border: 1px solid rgba(139, 92, 246, 0.5);
+      color: #c084fc;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .add-comment-btn:hover { background: rgba(139, 92, 246, 0.3); }
+    
+    .variants-container { padding: 1rem; }
+    
+    .variant-card {
+      background: rgba(0,0,0,0.2);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      overflow: hidden;
+    }
+    .variant-header {
+      background: rgba(139, 92, 246, 0.1);
+      padding: 1rem 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      cursor: pointer;
+    }
+    .variant-header:hover { background: rgba(139, 92, 246, 0.15); }
+    .variant-name { font-weight: 600; font-size: 1.1rem; }
+    .variant-price { font-size: 1.25rem; font-weight: 700; color: #4ade80; }
+    
+    .badge {
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .badge-materials { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+    .badge-services { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
+    .badge-time { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+    
+    .variant-content { padding: 1rem 1.25rem; display: none; }
+    .variant-content.open { display: block; }
+    
+    .section-title {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #a1a1aa;
+      margin: 1rem 0 0.5rem;
+      padding-bottom: 0.25rem;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .items-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .items-table th {
+      text-align: left;
+      padding: 0.5rem;
+      color: #71717a;
+      font-weight: 500;
+      font-size: 0.8rem;
+    }
+    .items-table td {
+      padding: 0.5rem;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .price-purchase { color: #f87171; }
+    .price-sale { color: #4ade80; }
+    .price-profit { color: #fbbf24; }
+    .time-value { color: #22d3ee; }
+    
+    .totals-row { background: rgba(255,255,255,0.05); font-weight: 600; }
+    
+    .editable-time {
+      background: rgba(34, 211, 238, 0.1);
+      border: 1px solid rgba(34, 211, 238, 0.3);
+      border-radius: 4px;
+      padding: 0.25rem 0.5rem;
+      color: #22d3ee;
+      width: 60px;
+      text-align: center;
+    }
+    .editable-time:focus {
+      outline: none;
+      border-color: #22d3ee;
+      background: rgba(34, 211, 238, 0.2);
+    }
+    .editable-time.changed {
+      background: rgba(251, 191, 36, 0.2);
+      border-color: #fbbf24;
+      color: #fbbf24;
+    }
+    
+    .workflow-tasks { margin-left: 1.5rem; font-size: 0.85rem; color: #a1a1aa; }
+    .workflow-task {
+      padding: 0.35rem 0;
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .task-order { color: #8b5cf6; font-weight: 600; min-width: 25px; }
+    .task-time { margin-left: auto; display: flex; align-items: center; gap: 0.25rem; }
+    
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #1a1a3e;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      padding: 2rem;
+      max-width: 500px;
+      width: 90%;
+    }
+    .modal h3 { margin-bottom: 1rem; color: #fbbf24; }
+    .modal textarea {
+      width: 100%;
+      min-height: 120px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 1rem;
+      color: #fff;
+      font-family: inherit;
+    }
+    .modal select {
+      width: 100%;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 0.75rem;
+      color: #fff;
+      margin-bottom: 1rem;
+    }
+    .modal-buttons { display: flex; gap: 1rem; margin-top: 1rem; justify-content: flex-end; }
+    .modal-btn { padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-weight: 500; }
+    .modal-btn-cancel { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #a1a1aa; }
+    .modal-btn-save { background: linear-gradient(90deg, #8b5cf6, #6366f1); border: none; color: white; }
+    
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      padding: 1rem 1.5rem;
+      border-radius: 8px;
+      z-index: 1001;
+      display: none;
+    }
+    .toast.success { background: rgba(34, 197, 94, 0.9); }
+    .toast.error { background: rgba(239, 68, 68, 0.9); }
+    .toast.show { display: block; }
+    
+    .summary-box {
+      background: rgba(74, 222, 128, 0.1);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 1rem;
+    }
+    .summary-item { text-align: center; }
+    .summary-label { font-size: 0.75rem; color: #a1a1aa; }
+    .summary-value { font-size: 1.1rem; font-weight: 700; }
+    
+    .footer {
+      text-align: center;
+      margin-top: 3rem;
+      padding-top: 2rem;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      color: #71717a;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>✏️ Cenotvorba produktov</h1>
+    <p class="subtitle">Kliknite na časy pre úpravu • Zmeny sa ukladajú do databázy</p>
+    
+    <div class="author-section">
+      <div>
+        <label>Vaše meno:</label>
+        <input type="text" id="authorName" placeholder="Meno">
+      </div>
+      <div>
+        <label>Email:</label>
+        <input type="email" id="authorEmail" placeholder="email@example.com">
+      </div>
+      <div style="margin-left: auto;">
+        <button class="add-comment-btn" onclick="saveAllChanges()" id="saveBtn">
+          💾 Uložiť zmeny (<span id="changesCount">0</span>)
+        </button>
+      </div>
+    </div>
+    
+    <div id="content">
+      <div class="loading">
+        <div class="loading-spinner"></div>
+        <p>Načítavam produkty...</p>
+      </div>
+    </div>
+    
+    <footer class="footer">Business Flow AI • Pricing Review</footer>
+  </div>
+  
+  <div class="modal-overlay" id="commentModal">
+    <div class="modal">
+      <h3>💬 Pridať pripomienku</h3>
+      <input type="hidden" id="modalProductId">
+      <input type="hidden" id="modalVariantId">
+      <input type="hidden" id="modalServiceId">
+      <select id="feedbackType">
+        <option value="comment">📝 Pripomienka</option>
+        <option value="time_suggestion">⏱️ Návrh času</option>
+        <option value="price_suggestion">💰 Návrh ceny</option>
+        <option value="issue">⚠️ Problém</option>
+      </select>
+      <textarea id="commentText" placeholder="Napíšte pripomienku..."></textarea>
+      <div class="modal-buttons">
+        <button class="modal-btn modal-btn-cancel" onclick="closeModal()">Zrušiť</button>
+        <button class="modal-btn modal-btn-save" onclick="saveComment()">Uložiť</button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="toast" id="toast"></div>
+  
+  <script>
+    const TOKEN = 'pricing-review-2024';
+    let pendingChanges = [];
+    let products = [];
+    
+    async function loadProducts() {
+      try {
+        const res = await fetch('/api/products?token=' + TOKEN);
+        const data = await res.json();
+        products = data.products || [];
+        renderProducts();
+      } catch (error) {
+        document.getElementById('content').innerHTML = '<div class="loading" style="color: #f87171;">❌ Chyba pri načítaní</div>';
+      }
+    }
+    
+    function renderProducts() {
+      if (products.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="loading">Žiadne produkty</div>';
+        return;
+      }
+      
+      let html = '';
+      
+      for (const product of products) {
+        html += '<div class="product-card" data-product-id="' + product.id + '">';
+        html += '<div class="product-header"><div class="product-name">📦 ' + product.name + '</div>';
+        html += '<button class="add-comment-btn" onclick="openModal(\'' + product.id + '\')">💬 Pripomienka</button></div>';
+        html += '<div class="variants-container">';
+        
+        product.variants.forEach((variant, idx) => {
+          const matCost = variant.materials.reduce((s, m) => s + m.purchasePrice * m.quantity, 0);
+          const matSale = variant.materials.reduce((s, m) => s + m.salePrice * m.quantity, 0);
+          
+          let svcCost = 0, svcSale = 0, totalTime = 0;
+          variant.services.forEach(s => {
+            const qty = s.quantity || 1;
+            if (s.pricingModel === 'hourly') {
+              const hrs = (s.workflow?.reduce((t, w) => t + (w.estimated_duration || 0), 0) || 0) / 60;
+              svcCost += (s.purchasePrice || 0) * hrs;
+              svcSale += (s.salePrice || 0) * hrs;
+            } else {
+              svcCost += (s.purchasePrice || 0) * qty;
+              svcSale += (s.salePrice || 0) * qty;
+            }
+            s.workflow?.forEach(w => {
+              totalTime += w.is_time_proportional ? (w.base_time_per_unit || 0) * qty : (w.estimated_duration || 0);
+            });
+          });
+          
+          const totalSale = matSale + svcSale;
+          const totalCost = matCost + svcCost;
+          const profit = totalSale - totalCost;
+          const margin = totalSale > 0 ? ((profit / totalSale) * 100).toFixed(1) : 0;
+          
+          html += '<div class="variant-card">';
+          html += '<div class="variant-header" onclick="toggleVariant(this)">';
+          html += '<div><span class="variant-name">#' + (idx + 1) + ' ' + variant.name + '</span>';
+          html += '<div style="margin-top:0.5rem;display:flex;gap:0.5rem;flex-wrap:wrap;">';
+          html += '<span class="badge badge-materials">📦 ' + variant.materials.length + '</span>';
+          html += '<span class="badge badge-services">🔧 ' + variant.services.length + '</span>';
+          html += '<span class="badge badge-time">⏱️ ' + (totalTime / 60).toFixed(1) + 'h</span>';
+          html += '</div></div>';
+          html += '<div style="text-align:right;"><div class="variant-price">€' + totalSale.toFixed(2) + '</div>';
+          html += '<div style="font-size:0.8rem;color:#a1a1aa;">Marža: ' + margin + '%</div></div>';
+          html += '<span>▼</span></div>';
+          
+          html += '<div class="variant-content' + (idx === 0 ? ' open' : '') + '">';
+          
+          // Materials
+          if (variant.materials.length > 0) {
+            html += '<div class="section-title">📦 Materiály</div>';
+            html += '<table class="items-table"><thead><tr><th>Materiál</th><th>Qty</th><th>Nákup</th><th>Predaj</th></tr></thead><tbody>';
+            variant.materials.forEach(m => {
+              html += '<tr><td>' + m.name + '</td><td>' + m.quantity + ' ' + m.unit + '</td>';
+              html += '<td class="price-purchase">€' + (m.purchasePrice * m.quantity).toFixed(2) + '</td>';
+              html += '<td class="price-sale">€' + (m.salePrice * m.quantity).toFixed(2) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+          }
+          
+          // Services
+          if (variant.services.length > 0) {
+            html += '<div class="section-title">🔧 Služby - EDITOVATEĽNÉ ČASY</div>';
+            html += '<table class="items-table"><thead><tr><th>Služba</th><th>Qty</th><th>Nákup</th><th>Predaj</th></tr></thead><tbody>';
+            
+            variant.services.forEach(s => {
+              html += '<tr><td><div>' + s.name + '</div>';
+              html += '<div style="font-size:0.75rem;color:#71717a;">' + s.pricingModel + ' • ' + s.unit + '</div>';
+              
+              if (s.workflow?.length > 0) {
+                html += '<div class="workflow-tasks">';
+                s.workflow.forEach(w => {
+                  const field = w.is_time_proportional ? 'base_time_per_unit' : 'estimated_duration';
+                  const val = w.is_time_proportional ? (w.base_time_per_unit || 0) : (w.estimated_duration || 0);
+                  const unit = w.is_time_proportional ? 'min/' + s.unit : 'min';
+                  
+                  html += '<div class="workflow-task">';
+                  html += '<span class="task-order">' + w.order + '.</span>';
+                  html += '<span>' + (w.task_name || 'Úloha') + '</span>';
+                  html += '<span class="task-time">';
+                  html += '<input type="number" class="editable-time" value="' + val + '" ';
+                  html += 'data-field="' + field + '" data-service-id="' + s.id + '" ';
+                  html += 'data-product-id="' + product.id + '" data-variant-id="' + variant.id + '" ';
+                  html += 'data-task-order="' + w.order + '" data-original="' + val + '" ';
+                  html += 'onchange="markChanged(this)"> ' + unit;
+                  html += '</span></div>';
+                });
+                html += '</div>';
+              }
+              
+              html += '</td><td>' + (s.quantity || 1) + ' ' + s.unit + '</td>';
+              html += '<td class="price-purchase">€' + (svcCost).toFixed(2) + '</td>';
+              html += '<td class="price-sale">€' + (svcSale).toFixed(2) + '</td></tr>';
+            });
+            
+            html += '</tbody></table>';
+          }
+          
+          // Summary
+          html += '<div class="summary-box">';
+          html += '<div class="summary-item"><div class="summary-label">Nákup</div><div class="summary-value price-purchase">€' + totalCost.toFixed(2) + '</div></div>';
+          html += '<div class="summary-item"><div class="summary-label">Predaj</div><div class="summary-value price-sale">€' + totalSale.toFixed(2) + '</div></div>';
+          html += '<div class="summary-item"><div class="summary-label">Zisk</div><div class="summary-value price-profit">€' + profit.toFixed(2) + '</div></div>';
+          html += '<div class="summary-item"><div class="summary-label">Čas</div><div class="summary-value time-value">' + (totalTime / 60).toFixed(1) + 'h</div></div>';
+          html += '</div>';
+          
+          html += '</div></div>';
+        });
+        
+        html += '</div></div>';
+      }
+      
+      document.getElementById('content').innerHTML = html;
+    }
+    
+    function toggleVariant(header) {
+      header.nextElementSibling.classList.toggle('open');
+    }
+    
+    function markChanged(input) {
+      const original = parseFloat(input.dataset.original);
+      const current = parseFloat(input.value);
+      
+      if (current !== original) {
+        input.classList.add('changed');
+        const change = {
+          serviceId: input.dataset.serviceId,
+          productId: input.dataset.productId,
+          variantId: input.dataset.variantId,
+          taskOrder: parseInt(input.dataset.taskOrder),
+          fieldName: input.dataset.field,
+          currentValue: original,
+          suggestedValue: current
+        };
+        pendingChanges = pendingChanges.filter(c => 
+          !(c.serviceId === change.serviceId && c.taskOrder === change.taskOrder && c.fieldName === change.fieldName)
+        );
+        pendingChanges.push(change);
+      } else {
+        input.classList.remove('changed');
+        pendingChanges = pendingChanges.filter(c => 
+          !(c.serviceId === input.dataset.serviceId && c.taskOrder === parseInt(input.dataset.taskOrder))
+        );
+      }
+      document.getElementById('changesCount').textContent = pendingChanges.length;
+    }
+    
+    async function saveAllChanges() {
+      if (pendingChanges.length === 0) {
+        showToast('Žiadne zmeny', 'error');
+        return;
+      }
+      
+      const authorName = document.getElementById('authorName').value || 'Anonymous';
+      const authorEmail = document.getElementById('authorEmail').value;
+      let ok = 0, fail = 0;
+      
+      for (const change of pendingChanges) {
+        try {
+          const res = await fetch('/api/feedback?token=' + TOKEN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update_time', ...change, authorName, authorEmail })
+          });
+          if (res.ok) {
+            ok++;
+            const input = document.querySelector(
+              'input[data-service-id="' + change.serviceId + '"][data-task-order="' + change.taskOrder + '"]'
+            );
+            if (input) {
+              input.dataset.original = change.suggestedValue;
+              input.classList.remove('changed');
+            }
+          } else fail++;
+        } catch { fail++; }
+      }
+      
+      pendingChanges = [];
+      document.getElementById('changesCount').textContent = '0';
+      showToast('✅ Uložených ' + ok + (fail ? ', chýb ' + fail : ''), fail ? 'error' : 'success');
+    }
+    
+    function openModal(productId, variantId = '', serviceId = '') {
+      document.getElementById('modalProductId').value = productId;
+      document.getElementById('modalVariantId').value = variantId;
+      document.getElementById('modalServiceId').value = serviceId;
+      document.getElementById('commentText').value = '';
+      document.getElementById('commentModal').classList.add('open');
+    }
+    
+    function closeModal() {
+      document.getElementById('commentModal').classList.remove('open');
+    }
+    
+    async function saveComment() {
+      const comment = document.getElementById('commentText').value;
+      if (!comment.trim()) { showToast('Napíšte text', 'error'); return; }
+      
+      try {
+        await fetch('/api/feedback?token=' + TOKEN, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'feedback',
+            productId: document.getElementById('modalProductId').value,
+            variantId: document.getElementById('modalVariantId').value || null,
+            serviceId: document.getElementById('modalServiceId').value || null,
+            feedbackType: document.getElementById('feedbackType').value,
+            comment,
+            authorName: document.getElementById('authorName').value || 'Anonymous',
+            authorEmail: document.getElementById('authorEmail').value
+          })
+        });
+        showToast('✅ Uložené', 'success');
+        closeModal();
+      } catch { showToast('❌ Chyba', 'error'); }
+    }
+    
+    function showToast(msg, type) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = 'toast show ' + type;
+      setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+    
+    loadProducts();
+  </script>
+</body>
+</html>
+
