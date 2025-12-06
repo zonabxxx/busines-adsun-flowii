@@ -16,12 +16,13 @@ app.use(express.static('public'));
 console.log('DB_URL:', process.env.DB_URL ? 'SET' : 'MISSING');
 console.log('DB_TOKEN:', process.env.DB_TOKEN ? 'SET (length: ' + process.env.DB_TOKEN.length + ')' : 'MISSING');
 
-// Database connection
+// Database connection - disable sync to avoid migration job error
 let client;
 try {
   client = createClient({
     url: process.env.DB_URL,
     authToken: process.env.DB_TOKEN,
+    intMode: 'number',
   });
   console.log('✅ Database client created');
 } catch (err) {
@@ -34,12 +35,22 @@ const SHARE_TOKEN = process.env.SHARE_TOKEN || 'pricing-review-2024';
 app.get('/health', async (req, res) => {
   try {
     if (!client) {
-      return res.status(500).json({ status: 'error', message: 'No database client' });
+      return res.status(500).json({ 
+        status: 'error', 
+        message: 'No database client',
+        dbUrl: process.env.DB_URL ? process.env.DB_URL.substring(0, 30) + '...' : 'MISSING',
+        tokenSet: !!process.env.DB_TOKEN
+      });
     }
-    await client.execute('SELECT 1');
-    res.json({ status: 'ok', db: 'connected' });
+    const result = await client.execute('SELECT 1 as test');
+    res.json({ status: 'ok', db: 'connected', result: result.rows });
   } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message });
+    res.status(500).json({ 
+      status: 'error', 
+      message: error.message,
+      dbUrl: process.env.DB_URL ? process.env.DB_URL.substring(0, 30) + '...' : 'MISSING',
+      tokenLength: process.env.DB_TOKEN ? process.env.DB_TOKEN.length : 0
+    });
   }
 });
 
