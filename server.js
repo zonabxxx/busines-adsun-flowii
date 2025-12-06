@@ -143,58 +143,68 @@ app.post('/api/feedback', async (req, res) => {
       comment, authorName, authorEmail, taskOrder
     } = req.body;
     
+    console.log('📝 Feedback received:', { action, serviceId, fieldName, currentValue, suggestedValue, taskOrder });
+    
+    // Helper to escape SQL strings
+    const esc = (val) => val ? String(val).replace(/'/g, "''") : null;
+    const escOrNull = (val) => val ? `'${esc(val)}'` : 'NULL';
+    
     // Time update - save to database
     if (action === 'update_time' && serviceId && fieldName && suggestedValue !== undefined) {
       const feedbackId = uuidv4();
       
-      // Save audit log
+      // Save audit log using raw SQL
       await client.execute(`
         INSERT INTO product_pricing_feedback 
         (id, product_id, variant_id, service_id, feedback_type, field_name, current_value, suggested_value, comment, author_name, author_email, status)
-        VALUES (?, ?, ?, ?, 'time_update', ?, ?, ?, ?, ?, ?, 'applied')
-      `, [feedbackId, productId, variantId, serviceId, fieldName, String(currentValue), String(suggestedValue), comment || 'Time update', authorName, authorEmail]);
+        VALUES ('${feedbackId}', ${escOrNull(productId)}, ${escOrNull(variantId)}, '${esc(serviceId)}', 'time_update', '${esc(fieldName)}', '${esc(currentValue)}', '${esc(suggestedValue)}', '${esc(comment) || 'Time update'}', '${esc(authorName) || 'Anonymous'}', ${escOrNull(authorEmail)}, 'applied')
+      `);
+      console.log('✅ Audit log saved');
       
-      // Find entity_id
+      // Find entity_id using raw SQL
       const entityResult = await client.execute(`
         SELECT e.id as entityId
         FROM entities e
         JOIN attributes a ON e.id = a.entity_id
         WHERE e.table_id IN (SELECT id FROM table_definitions WHERE name = 'calculation_services')
-        AND a.attribute_name = 'id' AND a.string_value = ?
-      `, [serviceId]);
+        AND a.attribute_name = 'id' AND a.string_value = '${esc(serviceId)}'
+      `);
+      
+      console.log('🔍 Entity lookup result:', entityResult.rows.length, 'rows');
       
       if (entityResult.rows.length > 0) {
         const entityId = entityResult.rows[0].entityId;
+        console.log('📌 Found entityId:', entityId);
         
         // Update service_checklists
         if (fieldName === 'estimated_duration' || fieldName === 'base_time_per_unit') {
-          await client.execute(`
+          const updateQuery = `
             UPDATE service_checklists 
-            SET ${fieldName} = ?, updated_at = unixepoch()
-            WHERE service_entity_id = ? AND "order" = ?
-          `, [Number(suggestedValue), entityId, taskOrder || 1]);
+            SET ${fieldName} = ${Number(suggestedValue)}, updated_at = unixepoch()
+            WHERE service_entity_id = '${esc(entityId)}' AND "order" = ${taskOrder || 1}
+          `;
+          console.log('🔄 Update query:', updateQuery);
+          await client.execute(updateQuery);
+          console.log('✅ Service checklist updated');
         }
       }
       
       return res.json({ success: true, message: 'Time updated', feedbackId });
     }
     
-    // Regular feedback
+    // Regular feedback using raw SQL
     const feedbackId = uuidv4();
     await client.execute(`
       INSERT INTO product_pricing_feedback 
       (id, product_id, variant_id, service_id, material_id, feedback_type, field_name, current_value, suggested_value, comment, author_name, author_email)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      feedbackId, productId || null, variantId || null, serviceId || null, materialId || null,
-      feedbackType || 'comment', fieldName || null, currentValue || null, suggestedValue || null,
-      comment || null, authorName || 'Anonymous', authorEmail || null
-    ]);
+      VALUES ('${feedbackId}', ${escOrNull(productId)}, ${escOrNull(variantId)}, ${escOrNull(serviceId)}, ${escOrNull(materialId)}, '${esc(feedbackType) || 'comment'}', ${escOrNull(fieldName)}, ${escOrNull(currentValue)}, ${escOrNull(suggestedValue)}, ${escOrNull(comment)}, '${esc(authorName) || 'Anonymous'}', ${escOrNull(authorEmail)})
+    `);
+    console.log('✅ Feedback saved:', feedbackId);
     
     res.json({ success: true, message: 'Feedback saved', feedbackId });
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ error: 'Failed to save feedback' });
+    console.error('❌ Feedback error:', error);
+    res.status(500).json({ error: 'Failed to save feedback', details: error.message });
   }
 });
 
