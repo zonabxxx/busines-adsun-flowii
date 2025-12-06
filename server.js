@@ -49,15 +49,30 @@ app.get('/health', async (req, res) => {
     const pvmTest = await client.execute('SELECT * FROM product_variant_materials WHERE variant_id = ?', [testVariant]);
     const pvsTest = await client.execute('SELECT * FROM product_variant_services WHERE variant_id = ?', [testVariant]);
     
+    // Count total records in tables
+    const pvmTotal = await client.execute('SELECT COUNT(*) as cnt FROM product_variant_materials');
+    const pvsTotal = await client.execute('SELECT COUNT(*) as cnt FROM product_variant_services');
+    const matsTotal = await client.execute('SELECT COUNT(*) as cnt FROM materials');
+    
+    // Get sample variant IDs from pvm
+    const samplePvm = await client.execute('SELECT DISTINCT variant_id FROM product_variant_materials LIMIT 5');
+    
     res.json({ 
       status: 'ok', 
       db: 'connected', 
+      dbUrl: process.env.DB_URL ? process.env.DB_URL.substring(0, 50) + '...' : 'MISSING',
       result: result.rows,
       testVariant,
       pvmCount: pvmTest.rows.length,
       pvmRows: pvmTest.rows,
       pvsCount: pvsTest.rows.length,
-      pvsRows: pvsTest.rows
+      pvsRows: pvsTest.rows,
+      totals: {
+        pvm: pvmTotal.rows[0]?.cnt || 0,
+        pvs: pvsTotal.rows[0]?.cnt || 0,
+        materials: matsTotal.rows[0]?.cnt || 0
+      },
+      sampleVariantIds: samplePvm.rows.map(r => r.variant_id)
     });
   } catch (error) {
     res.status(500).json({ 
