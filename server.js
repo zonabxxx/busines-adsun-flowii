@@ -231,42 +231,37 @@ app.get('/api/products', async (req, res) => {
       for (const v of variants) {
         console.log(`Processing variant: ${v.id} - ${v.name}`);
         
-        // Debug: Check if variant exists in pvm table at all
-        const pvmCheck = await client.execute(`
-          SELECT COUNT(*) as cnt FROM product_variant_materials WHERE variant_id = ?
-        `, [v.id]);
-        console.log(`  PVM records for variant: ${pvmCheck.rows[0]?.cnt || 0}`);
+        // Use raw SQL to avoid parameter binding issues
+        const variantId = v.id.replace(/'/g, "''"); // escape quotes
         
-        // Get materials - simplified without join first
+        // Get materials with JOIN
         const materialsResult = await client.execute(`
-          SELECT pvm.material_id, pvm.quantity
+          SELECT pvm.material_id, pvm.quantity, m.id, m.name, m.unit, m.purchase_price, m.sale_price
           FROM product_variant_materials pvm
-          WHERE pvm.variant_id = ?
-        `, [v.id]);
+          JOIN materials m ON pvm.material_id = m.id
+          WHERE pvm.variant_id = '${variantId}'
+        `);
         console.log(`  Materials found: ${materialsResult.rows.length}`);
         
-        // Get material details separately
-        const materials = [];
-        for (const pvm of materialsResult.rows) {
-          const matResult = await client.execute(`
-            SELECT id, name, unit, purchase_price, sale_price FROM materials WHERE id = ?
-          `, [pvm.material_id]);
-          if (matResult.rows.length > 0) {
-            materials.push({
-              ...matResult.rows[0],
-              quantity: pvm.quantity || 1
-            });
-          }
-        }
+        const materials = materialsResult.rows.map(m => ({
+          id: m.material_id,
+          name: m.name,
+          unit: m.unit,
+          purchasePrice: m.purchase_price || 0,
+          salePrice: m.sale_price || 0,
+          quantity: m.quantity || 1
+        }));
         
         // Get services
         const servicesResult = await client.execute(`
-          SELECT pvs.* FROM product_variant_services pvs WHERE pvs.variant_id = ?
-        `, [v.id]);
+          SELECT pvs.* FROM product_variant_services pvs WHERE pvs.variant_id = '${variantId}'
+        `);
         console.log(`  Services found: ${servicesResult.rows.length}`);
         
         const services = [];
         for (const s of servicesResult.rows) {
+          const serviceId = (s.service_id || '').replace(/'/g, "''");
+          
           // Get service details
           const svcResult = await client.execute(`
             SELECT e.id as entityId,
@@ -280,21 +275,22 @@ app.get('/api/products', async (req, res) => {
             FROM entities e
             JOIN attributes a ON e.id = a.entity_id
             WHERE e.table_id IN (SELECT id FROM table_definitions WHERE name = 'calculation_services')
-            AND EXISTS (SELECT 1 FROM attributes a2 WHERE a2.entity_id = e.id AND a2.attribute_name = 'id' AND a2.string_value = ?)
+            AND EXISTS (SELECT 1 FROM attributes a2 WHERE a2.entity_id = e.id AND a2.attribute_name = 'id' AND a2.string_value = '${serviceId}')
             GROUP BY e.id
-          `, [s.service_id]);
+          `);
           
           if (svcResult.rows.length > 0) {
             const svc = svcResult.rows[0];
+            const entityId = svc.entityId;
             
             // Get workflow
             const workflow = await client.execute(`
               SELECT sc.*, tt.name as task_name
               FROM service_checklists sc
               LEFT JOIN task_templates tt ON sc.task_template_id = tt.id
-              WHERE sc.service_entity_id = ?
+              WHERE sc.service_entity_id = ${entityId}
               ORDER BY sc."order"
-            `, [svc.entityId]);
+            `);
             
             services.push({
               ...svc,
@@ -306,14 +302,7 @@ app.get('/api/products', async (req, res) => {
         
         enrichedVariants.push({
           ...v,
-          materials: materials.map(m => ({
-            id: m.id,
-            name: m.name,
-            unit: m.unit,
-            purchasePrice: m.purchase_price || 0,
-            salePrice: m.sale_price || 0,
-            quantity: m.quantity || 1
-          })),
+          materials,
           services
         });
       }
