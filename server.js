@@ -12,13 +12,36 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// Check environment variables
+console.log('DB_URL:', process.env.DB_URL ? 'SET' : 'MISSING');
+console.log('DB_TOKEN:', process.env.DB_TOKEN ? 'SET (length: ' + process.env.DB_TOKEN.length + ')' : 'MISSING');
+
 // Database connection
-const client = createClient({
-  url: process.env.DB_URL,
-  authToken: process.env.DB_TOKEN,
-});
+let client;
+try {
+  client = createClient({
+    url: process.env.DB_URL,
+    authToken: process.env.DB_TOKEN,
+  });
+  console.log('✅ Database client created');
+} catch (err) {
+  console.error('❌ Failed to create database client:', err.message);
+}
 
 const SHARE_TOKEN = process.env.SHARE_TOKEN || 'pricing-review-2024';
+
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    if (!client) {
+      return res.status(500).json({ status: 'error', message: 'No database client' });
+    }
+    await client.execute('SELECT 1');
+    res.json({ status: 'ok', db: 'connected' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
 
 // Serve HTML page
 app.get('/', (req, res) => {
@@ -48,7 +71,7 @@ app.get('/api/feedback', async (req, res) => {
     res.json({ feedback: result.rows });
   } catch (error) {
     console.error('Error:', error);
-    res.status(500).json({ error: 'Failed to fetch feedback' });
+    res.status(500).json({ error: 'Failed to fetch feedback', details: error.message });
   }
 });
 
