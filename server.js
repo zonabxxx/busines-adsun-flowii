@@ -189,14 +189,33 @@ app.get('/api/products', async (req, res) => {
       for (const v of variants) {
         console.log(`Processing variant: ${v.id} - ${v.name}`);
         
-        // Get materials
+        // Debug: Check if variant exists in pvm table at all
+        const pvmCheck = await client.execute(`
+          SELECT COUNT(*) as cnt FROM product_variant_materials WHERE variant_id = ?
+        `, [v.id]);
+        console.log(`  PVM records for variant: ${pvmCheck.rows[0]?.cnt || 0}`);
+        
+        // Get materials - simplified without join first
         const materialsResult = await client.execute(`
-          SELECT pvm.*, m.name, m.unit, m.purchase_price, m.sale_price
+          SELECT pvm.material_id, pvm.quantity
           FROM product_variant_materials pvm
-          JOIN materials m ON pvm.material_id = m.id
           WHERE pvm.variant_id = ?
         `, [v.id]);
         console.log(`  Materials found: ${materialsResult.rows.length}`);
+        
+        // Get material details separately
+        const materials = [];
+        for (const pvm of materialsResult.rows) {
+          const matResult = await client.execute(`
+            SELECT id, name, unit, purchase_price, sale_price FROM materials WHERE id = ?
+          `, [pvm.material_id]);
+          if (matResult.rows.length > 0) {
+            materials.push({
+              ...matResult.rows[0],
+              quantity: pvm.quantity || 1
+            });
+          }
+        }
         
         // Get services
         const servicesResult = await client.execute(`
@@ -245,8 +264,8 @@ app.get('/api/products', async (req, res) => {
         
         enrichedVariants.push({
           ...v,
-          materials: materialsResult.rows.map(m => ({
-            id: m.material_id,
+          materials: materials.map(m => ({
+            id: m.id,
             name: m.name,
             unit: m.unit,
             purchasePrice: m.purchase_price || 0,
