@@ -284,16 +284,18 @@ app.get('/api/products', async (req, res) => {
             const entityId = svc.entityId;
             
             let workflow = { rows: [] };
-            if (entityId && !isNaN(entityId)) {
-              // Get workflow - entityId is integer
+            if (entityId) {
+              // Get workflow - entityId is UUID string
               try {
+                const escapedEntityId = String(entityId).replace(/'/g, "''");
                 workflow = await client.execute(`
                   SELECT sc.*, tt.name as task_name
                   FROM service_checklists sc
                   LEFT JOIN task_templates tt ON sc.task_template_id = tt.id
-                  WHERE sc.service_entity_id = ${parseInt(entityId, 10)}
+                  WHERE sc.service_entity_id = '${escapedEntityId}'
                   ORDER BY sc."order"
                 `);
+                console.log(`    Workflow tasks: ${workflow.rows.length}`);
               } catch (wfErr) {
                 console.log(`  Workflow error for entityId ${entityId}:`, wfErr.message);
               }
