@@ -165,17 +165,8 @@ app.post('/api/feedback', async (req, res) => {
     const esc = (val) => val ? String(val).replace(/'/g, "''") : null;
     const escOrNull = (val) => val ? `'${esc(val)}'` : 'NULL';
     
-    // Time update - save to database
+    // Time update - directly update service_checklists (no feedback table needed)
     if (action === 'update_time' && serviceId && fieldName && suggestedValue !== undefined) {
-      const feedbackId = uuidv4();
-      
-      // Save audit log using raw SQL
-      await client.execute(`
-        INSERT INTO product_pricing_feedback 
-        (id, product_id, variant_id, service_id, feedback_type, field_name, current_value, suggested_value, comment, author_name, author_email, status)
-        VALUES ('${feedbackId}', ${escOrNull(productId)}, ${escOrNull(variantId)}, '${esc(serviceId)}', 'time_update', '${esc(fieldName)}', '${esc(currentValue)}', '${esc(suggestedValue)}', '${esc(comment) || 'Time update'}', '${esc(authorName) || 'Anonymous'}', ${escOrNull(authorEmail)}, 'applied')
-      `);
-      console.log('✅ Audit log saved');
       
       // Find entity_id using raw SQL
       const entityResult = await client.execute(`
@@ -192,7 +183,7 @@ app.post('/api/feedback', async (req, res) => {
         const entityId = entityResult.rows[0].entityId;
         console.log('📌 Found entityId:', entityId);
         
-        // Update service_checklists
+        // Update service_checklists directly
         if (fieldName === 'estimated_duration' || fieldName === 'base_time_per_unit') {
           const updateQuery = `
             UPDATE service_checklists 
@@ -201,23 +192,18 @@ app.post('/api/feedback', async (req, res) => {
           `;
           console.log('🔄 Update query:', updateQuery);
           await client.execute(updateQuery);
-          console.log('✅ Service checklist updated');
+          console.log('✅ Service checklist updated: ${fieldName} = ${suggestedValue}');
         }
+        
+        return res.json({ success: true, message: 'Time updated' });
+      } else {
+        return res.json({ success: false, message: 'Service not found' });
       }
-      
-      return res.json({ success: true, message: 'Time updated', feedbackId });
     }
     
-    // Regular feedback using raw SQL
-    const feedbackId = uuidv4();
-    await client.execute(`
-      INSERT INTO product_pricing_feedback 
-      (id, product_id, variant_id, service_id, material_id, feedback_type, field_name, current_value, suggested_value, comment, author_name, author_email)
-      VALUES ('${feedbackId}', ${escOrNull(productId)}, ${escOrNull(variantId)}, ${escOrNull(serviceId)}, ${escOrNull(materialId)}, '${esc(feedbackType) || 'comment'}', ${escOrNull(fieldName)}, ${escOrNull(currentValue)}, ${escOrNull(suggestedValue)}, ${escOrNull(comment)}, '${esc(authorName) || 'Anonymous'}', ${escOrNull(authorEmail)})
-    `);
-    console.log('✅ Feedback saved:', feedbackId);
-    
-    res.json({ success: true, message: 'Feedback saved', feedbackId });
+    // For other feedback types, just log it (no table needed)
+    console.log('📝 Feedback (not saved):', { feedbackType, comment });
+    res.json({ success: true, message: 'Feedback received' });
   } catch (error) {
     console.error('❌ Feedback error:', error);
     res.status(500).json({ error: 'Failed to save feedback', details: error.message });
