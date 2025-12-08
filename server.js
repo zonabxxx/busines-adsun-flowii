@@ -231,7 +231,16 @@ app.get('/api/products', async (req, res) => {
     
     console.log('📦 Loading products...');
     
-    // Get products
+    // First get table_id for products (faster than subquery)
+    const tableDefResult = await client.execute(`SELECT id FROM table_definitions WHERE name = 'products' LIMIT 1`);
+    if (tableDefResult.rows.length === 0) {
+      console.log('❌ No products table found');
+      return res.json({ products: [] });
+    }
+    const productsTableId = tableDefResult.rows[0].id;
+    console.log(`📦 Products table ID: ${productsTableId}`);
+    
+    // Get products with direct table_id
     const productsResult = await client.execute(`
       SELECT 
         e.id as entityId,
@@ -241,7 +250,7 @@ app.get('/api/products', async (req, res) => {
         MAX(CASE WHEN a.attribute_name = 'variants' THEN a.json_value END) as variants
       FROM entities e
       JOIN attributes a ON e.id = a.entity_id
-      WHERE e.table_id IN (SELECT id FROM table_definitions WHERE name = 'products')
+      WHERE e.table_id = '${productsTableId}'
       GROUP BY e.id
       ORDER BY MAX(CASE WHEN a.attribute_name = 'name' THEN a.string_value END)
       LIMIT 20
@@ -278,8 +287,13 @@ app.get('/api/products', async (req, res) => {
     });
     console.log(`📦 Loaded ${allVariantServices.rows.length} variant services`);
     
+    // Get services table_id
+    const servicesTableResult = await client.execute(`SELECT id FROM table_definitions WHERE name = 'calculation_services' LIMIT 1`);
+    const servicesTableId = servicesTableResult.rows.length > 0 ? servicesTableResult.rows[0].id : null;
+    console.log(`📦 Services table ID: ${servicesTableId}`);
+    
     // Pre-load all services
-    const allServices = await client.execute(`
+    const allServices = servicesTableId ? await client.execute(`
       SELECT e.id as entityId,
         MAX(CASE WHEN a.attribute_name = 'id' THEN a.string_value END) as id,
         MAX(CASE WHEN a.attribute_name = 'name' THEN a.string_value END) as name,
@@ -290,9 +304,9 @@ app.get('/api/products', async (req, res) => {
         MAX(CASE WHEN a.attribute_name = 'baseTimePerUnit' THEN a.number_value END) as baseTimePerUnit
       FROM entities e
       JOIN attributes a ON e.id = a.entity_id
-      WHERE e.table_id IN (SELECT id FROM table_definitions WHERE name = 'calculation_services')
+      WHERE e.table_id = '${servicesTableId}'
       GROUP BY e.id
-    `);
+    `) : { rows: [] };
     const servicesMap = new Map();
     allServices.rows.forEach(s => servicesMap.set(s.id, s));
     console.log(`📦 Loaded ${allServices.rows.length} services`);
