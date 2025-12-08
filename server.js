@@ -193,6 +193,10 @@ app.post('/api/feedback', async (req, res) => {
           console.log('🔄 Update query:', updateQuery);
           await client.execute(updateQuery);
           console.log('✅ Service checklist updated: ${fieldName} = ${suggestedValue}');
+          
+          // Refresh cache after update
+          await loadProductsCache();
+          console.log('🔄 Cache refreshed after update');
         }
         
         return res.json({ success: true, message: 'Time updated' });
