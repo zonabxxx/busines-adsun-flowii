@@ -240,21 +240,32 @@ app.get('/api/products', async (req, res) => {
     const productsTableId = tableDefResult.rows[0].id;
     console.log(`📦 Products table ID: ${productsTableId}`);
     
-    // Get products with direct table_id
-    const productsResult = await client.execute(`
-      SELECT 
-        e.id as entityId,
-        MAX(CASE WHEN a.attribute_name = 'id' THEN a.string_value END) as productId,
-        MAX(CASE WHEN a.attribute_name = 'name' THEN a.string_value END) as name,
-        MAX(CASE WHEN a.attribute_name = 'description' THEN a.string_value END) as description,
-        MAX(CASE WHEN a.attribute_name = 'variants' THEN a.json_value END) as variants
-      FROM entities e
-      JOIN attributes a ON e.id = a.entity_id
-      WHERE e.table_id = '${productsTableId}'
-      GROUP BY e.id
-      ORDER BY MAX(CASE WHEN a.attribute_name = 'name' THEN a.string_value END)
-      LIMIT 20
-    `);
+    // Get product entities first
+    const entitiesResult = await client.execute(`SELECT id FROM entities WHERE table_id = '${productsTableId}' LIMIT 20`);
+    console.log(`📦 Found ${entitiesResult.rows.length} product entities`);
+    
+    if (entitiesResult.rows.length === 0) {
+      return res.json({ products: [] });
+    }
+    
+    const entityIds = entitiesResult.rows.map(r => `'${r.id}'`).join(',');
+    
+    // Get attributes for these entities
+    const attrsResult = await client.execute(`SELECT entity_id, attribute_name, string_value, json_value FROM attributes WHERE entity_id IN (${entityIds})`);
+    console.log(`📦 Found ${attrsResult.rows.length} attributes`);
+    
+    // Group attributes by entity
+    const productsResult = { rows: [] };
+    const entityMap = new Map();
+    attrsResult.rows.forEach(a => {
+      if (!entityMap.has(a.entity_id)) entityMap.set(a.entity_id, { entityId: a.entity_id });
+      const p = entityMap.get(a.entity_id);
+      if (a.attribute_name === 'id') p.productId = a.string_value;
+      if (a.attribute_name === 'name') p.name = a.string_value;
+      if (a.attribute_name === 'description') p.description = a.string_value;
+      if (a.attribute_name === 'variants') p.variants = a.json_value;
+    });
+    productsResult.rows = Array.from(entityMap.values()).filter(p => p.name);
     
     console.log(`📦 Found ${productsResult.rows.length} products`);
     
