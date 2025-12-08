@@ -220,7 +220,7 @@ app.post('/api/feedback', async (req, res) => {
   }
 });
 
-// Get products data for display
+// Get products data for display - OPTIMIZED version
 app.get('/api/products', async (req, res) => {
   try {
     const { token } = req.query;
@@ -228,6 +228,8 @@ app.get('/api/products', async (req, res) => {
     if (token !== SHARE_TOKEN) {
       return res.status(401).json({ error: 'Invalid token' });
     }
+    
+    console.log('📦 Loading products...');
     
     // Get products
     const productsResult = await client.execute(`
@@ -242,8 +244,74 @@ app.get('/api/products', async (req, res) => {
       WHERE e.table_id IN (SELECT id FROM table_definitions WHERE name = 'products')
       GROUP BY e.id
       ORDER BY MAX(CASE WHEN a.attribute_name = 'name' THEN a.string_value END)
+      LIMIT 20
     `);
     
+    console.log(`📦 Found ${productsResult.rows.length} products`);
+    
+    // Pre-load all materials in one query
+    const allMaterials = await client.execute(`
+      SELECT pvm.variant_id, pvm.material_id, pvm.quantity, m.id, m.name, m.unit, m.purchase_price, m.sale_price
+      FROM product_variant_materials pvm
+      JOIN materials m ON pvm.material_id = m.id
+    `);
+    const materialsMap = new Map();
+    allMaterials.rows.forEach(m => {
+      if (!materialsMap.has(m.variant_id)) materialsMap.set(m.variant_id, []);
+      materialsMap.get(m.variant_id).push({
+        id: m.material_id,
+        name: m.name,
+        unit: m.unit,
+        purchasePrice: m.purchase_price || 0,
+        salePrice: m.sale_price || 0,
+        quantity: m.quantity || 1
+      });
+    });
+    console.log(`📦 Loaded ${allMaterials.rows.length} materials`);
+    
+    // Pre-load all variant services
+    const allVariantServices = await client.execute(`SELECT * FROM product_variant_services`);
+    const variantServicesMap = new Map();
+    allVariantServices.rows.forEach(s => {
+      if (!variantServicesMap.has(s.variant_id)) variantServicesMap.set(s.variant_id, []);
+      variantServicesMap.get(s.variant_id).push(s);
+    });
+    console.log(`📦 Loaded ${allVariantServices.rows.length} variant services`);
+    
+    // Pre-load all services
+    const allServices = await client.execute(`
+      SELECT e.id as entityId,
+        MAX(CASE WHEN a.attribute_name = 'id' THEN a.string_value END) as id,
+        MAX(CASE WHEN a.attribute_name = 'name' THEN a.string_value END) as name,
+        MAX(CASE WHEN a.attribute_name = 'pricingModel' THEN a.string_value END) as pricingModel,
+        MAX(CASE WHEN a.attribute_name = 'unit' THEN a.string_value END) as unit,
+        MAX(CASE WHEN a.attribute_name = 'purchasePrice' THEN a.number_value END) as purchasePrice,
+        MAX(CASE WHEN a.attribute_name = 'salePrice' THEN a.number_value END) as salePrice,
+        MAX(CASE WHEN a.attribute_name = 'baseTimePerUnit' THEN a.number_value END) as baseTimePerUnit
+      FROM entities e
+      JOIN attributes a ON e.id = a.entity_id
+      WHERE e.table_id IN (SELECT id FROM table_definitions WHERE name = 'calculation_services')
+      GROUP BY e.id
+    `);
+    const servicesMap = new Map();
+    allServices.rows.forEach(s => servicesMap.set(s.id, s));
+    console.log(`📦 Loaded ${allServices.rows.length} services`);
+    
+    // Pre-load all workflows
+    const allWorkflows = await client.execute(`
+      SELECT sc.*, tt.name as task_name
+      FROM service_checklists sc
+      LEFT JOIN task_templates tt ON sc.task_template_id = tt.id
+      ORDER BY sc."order"
+    `);
+    const workflowsMap = new Map();
+    allWorkflows.rows.forEach(w => {
+      if (!workflowsMap.has(w.service_entity_id)) workflowsMap.set(w.service_entity_id, []);
+      workflowsMap.get(w.service_entity_id).push(w);
+    });
+    console.log(`📦 Loaded ${allWorkflows.rows.length} workflow tasks`);
+    
+    // Build products with cached data
     const products = [];
     
     for (const p of productsResult.rows) {
@@ -251,85 +319,21 @@ app.get('/api/products', async (req, res) => {
       const enrichedVariants = [];
       
       for (const v of variants) {
-        console.log(`Processing variant: ${v.id} - ${v.name}`);
+        const materials = materialsMap.get(v.id) || [];
+        const variantServices = variantServicesMap.get(v.id) || [];
         
-        // Use raw SQL to avoid parameter binding issues
-        const variantId = v.id.replace(/'/g, "''"); // escape quotes
-        
-        // Get materials with JOIN
-        const materialsResult = await client.execute(`
-          SELECT pvm.material_id, pvm.quantity, m.id, m.name, m.unit, m.purchase_price, m.sale_price
-          FROM product_variant_materials pvm
-          JOIN materials m ON pvm.material_id = m.id
-          WHERE pvm.variant_id = '${variantId}'
-        `);
-        console.log(`  Materials found: ${materialsResult.rows.length}`);
-        
-        const materials = materialsResult.rows.map(m => ({
-          id: m.material_id,
-          name: m.name,
-          unit: m.unit,
-          purchasePrice: m.purchase_price || 0,
-          salePrice: m.sale_price || 0,
-          quantity: m.quantity || 1
-        }));
-        
-        // Get services
-        const servicesResult = await client.execute(`
-          SELECT pvs.* FROM product_variant_services pvs WHERE pvs.variant_id = '${variantId}'
-        `);
-        console.log(`  Services found: ${servicesResult.rows.length}`);
-        
-        const services = [];
-        for (const s of servicesResult.rows) {
-          const serviceId = (s.service_id || '').replace(/'/g, "''");
+        const services = variantServices.map(vs => {
+          const svc = servicesMap.get(vs.service_id);
+          if (!svc) return null;
           
-          // Get service details
-          const svcResult = await client.execute(`
-            SELECT e.id as entityId,
-              MAX(CASE WHEN a.attribute_name = 'id' THEN a.string_value END) as id,
-              MAX(CASE WHEN a.attribute_name = 'name' THEN a.string_value END) as name,
-              MAX(CASE WHEN a.attribute_name = 'pricingModel' THEN a.string_value END) as pricingModel,
-              MAX(CASE WHEN a.attribute_name = 'unit' THEN a.string_value END) as unit,
-              MAX(CASE WHEN a.attribute_name = 'purchasePrice' THEN a.number_value END) as purchasePrice,
-              MAX(CASE WHEN a.attribute_name = 'salePrice' THEN a.number_value END) as salePrice,
-              MAX(CASE WHEN a.attribute_name = 'baseTimePerUnit' THEN a.number_value END) as baseTimePerUnit
-            FROM entities e
-            JOIN attributes a ON e.id = a.entity_id
-            WHERE e.table_id IN (SELECT id FROM table_definitions WHERE name = 'calculation_services')
-            AND EXISTS (SELECT 1 FROM attributes a2 WHERE a2.entity_id = e.id AND a2.attribute_name = 'id' AND a2.string_value = '${serviceId}')
-            GROUP BY e.id
-          `);
+          const workflow = workflowsMap.get(svc.entityId) || [];
           
-          if (svcResult.rows.length > 0) {
-            const svc = svcResult.rows[0];
-            const entityId = svc.entityId;
-            
-            let workflow = { rows: [] };
-            if (entityId) {
-              // Get workflow - entityId is UUID string
-              try {
-                const escapedEntityId = String(entityId).replace(/'/g, "''");
-                workflow = await client.execute(`
-                  SELECT sc.*, tt.name as task_name
-                  FROM service_checklists sc
-                  LEFT JOIN task_templates tt ON sc.task_template_id = tt.id
-                  WHERE sc.service_entity_id = '${escapedEntityId}'
-                  ORDER BY sc."order"
-                `);
-                console.log(`    Workflow tasks: ${workflow.rows.length}`);
-              } catch (wfErr) {
-                console.log(`  Workflow error for entityId ${entityId}:`, wfErr.message);
-              }
-            }
-            
-            services.push({
-              ...svc,
-              quantity: s.quantity || 1,
-              workflow: workflow.rows
-            });
-          }
-        }
+          return {
+            ...svc,
+            quantity: vs.quantity || 1,
+            workflow
+          };
+        }).filter(Boolean);
         
         enrichedVariants.push({
           ...v,
@@ -346,10 +350,11 @@ app.get('/api/products', async (req, res) => {
       });
     }
     
+    console.log(`✅ Returning ${products.length} products`);
     res.json({ products });
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ error: 'Failed to fetch products' });
+    console.error('❌ Error:', error);
+    res.status(500).json({ error: 'Failed to fetch products', details: error.message });
   }
 });
 
