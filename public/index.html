@@ -609,13 +609,6 @@
     }
     
     loadProducts();
-    
-    // Auto-refresh každých 45 sekúnd
-    setInterval(() => {
-      if (pendingChanges.length === 0) {
-        loadProducts();
-      }
-    }, 45000);
   </script>
 </body>
 </html>
