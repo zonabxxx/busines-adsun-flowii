@@ -558,6 +558,11 @@
       pendingChanges = [];
       document.getElementById('changesCount').textContent = '0';
       showToast('✅ Uložených ' + ok + (fail ? ', chýb ' + fail : ''), fail ? 'error' : 'success');
+      
+      // Refresh dáta z databázy po uložení
+      if (ok > 0) {
+        setTimeout(() => loadProducts(), 1000);
+      }
     }
     
     function openModal(productId, variantId = '', serviceId = '') {
