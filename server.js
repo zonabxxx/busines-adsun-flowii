@@ -3,6 +3,7 @@ const cors = require('cors');
 const { createClient } = require('@libsql/client');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,6 +12,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
+
+// Products cache (loaded at startup)
+let productsCache = null;
 
 // Check environment variables
 console.log('DB_URL:', process.env.DB_URL ? 'SET' : 'MISSING');
@@ -220,56 +224,63 @@ app.post('/api/feedback', async (req, res) => {
   }
 });
 
-// Get products data for display - OPTIMIZED version
-app.get('/api/products', async (req, res) => {
+// Load products cache at startup
+async function loadProductsCache() {
+  console.log('📦 Loading products cache...');
+  
   try {
-    const { token } = req.query;
-    
-    if (token !== SHARE_TOKEN) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-    
-    console.log('📦 Loading products...');
-    
-    // First get table_id for products (faster than subquery)
+    // Get products table ID
     const tableDefResult = await client.execute(`SELECT id FROM table_definitions WHERE name = 'products' LIMIT 1`);
     if (tableDefResult.rows.length === 0) {
-      console.log('❌ No products table found');
-      return res.json({ products: [] });
+      console.log('❌ No products table');
+      productsCache = { products: [] };
+      return;
     }
     const productsTableId = tableDefResult.rows[0].id;
-    console.log(`📦 Products table ID: ${productsTableId}`);
     
-    // Get product entities first
-    const entitiesResult = await client.execute(`SELECT id FROM entities WHERE table_id = '${productsTableId}' LIMIT 20`);
-    console.log(`📦 Found ${entitiesResult.rows.length} product entities`);
+    // Get services table ID
+    const servicesTableResult = await client.execute(`SELECT id FROM table_definitions WHERE name = 'calculation_services' LIMIT 1`);
+    const servicesTableId = servicesTableResult.rows.length > 0 ? servicesTableResult.rows[0].id : null;
     
-    if (entitiesResult.rows.length === 0) {
-      return res.json({ products: [] });
-    }
+    // Get all entities and attributes in batch
+    const entitiesResult = await client.execute(`SELECT id, table_id FROM entities WHERE table_id IN ('${productsTableId}'${servicesTableId ? `, '${servicesTableId}'` : ''})`);
+    console.log(`📦 Found ${entitiesResult.rows.length} entities`);
     
     const entityIds = entitiesResult.rows.map(r => `'${r.id}'`).join(',');
-    
-    // Get attributes for these entities
-    const attrsResult = await client.execute(`SELECT entity_id, attribute_name, string_value, json_value FROM attributes WHERE entity_id IN (${entityIds})`);
+    const attrsResult = entityIds ? await client.execute(`SELECT entity_id, attribute_name, string_value, number_value, json_value FROM attributes WHERE entity_id IN (${entityIds})`) : { rows: [] };
     console.log(`📦 Found ${attrsResult.rows.length} attributes`);
     
-    // Group attributes by entity
-    const productsResult = { rows: [] };
+    // Build entity map
     const entityMap = new Map();
     attrsResult.rows.forEach(a => {
-      if (!entityMap.has(a.entity_id)) entityMap.set(a.entity_id, { entityId: a.entity_id });
-      const p = entityMap.get(a.entity_id);
-      if (a.attribute_name === 'id') p.productId = a.string_value;
-      if (a.attribute_name === 'name') p.name = a.string_value;
-      if (a.attribute_name === 'description') p.description = a.string_value;
-      if (a.attribute_name === 'variants') p.variants = a.json_value;
+      if (!entityMap.has(a.entity_id)) entityMap.set(a.entity_id, {});
+      const e = entityMap.get(a.entity_id);
+      if (a.string_value) e[a.attribute_name] = a.string_value;
+      else if (a.number_value !== null) e[a.attribute_name] = a.number_value;
+      else if (a.json_value) e[a.attribute_name] = a.json_value;
     });
-    productsResult.rows = Array.from(entityMap.values()).filter(p => p.name);
     
-    console.log(`📦 Found ${productsResult.rows.length} products`);
+    entitiesResult.rows.forEach(e => {
+      if (entityMap.has(e.id)) {
+        entityMap.get(e.id)._tableId = e.table_id;
+        entityMap.get(e.id)._entityId = e.id;
+      }
+    });
     
-    // Pre-load all materials in one query
+    // Separate products and services
+    const productsRaw = [];
+    const servicesMap = new Map();
+    
+    entityMap.forEach((data, entityId) => {
+      if (data._tableId === productsTableId && data.name) {
+        productsRaw.push(data);
+      } else if (data._tableId === servicesTableId && data.id) {
+        servicesMap.set(data.id, { ...data, entityId });
+      }
+    });
+    console.log(`📦 Found ${productsRaw.length} products, ${servicesMap.size} services`);
+    
+    // Get all materials
     const allMaterials = await client.execute(`
       SELECT pvm.variant_id, pvm.material_id, pvm.quantity, m.id, m.name, m.unit, m.purchase_price, m.sale_price
       FROM product_variant_materials pvm
@@ -289,7 +300,7 @@ app.get('/api/products', async (req, res) => {
     });
     console.log(`📦 Loaded ${allMaterials.rows.length} materials`);
     
-    // Pre-load all variant services
+    // Get all variant services
     const allVariantServices = await client.execute(`SELECT * FROM product_variant_services`);
     const variantServicesMap = new Map();
     allVariantServices.rows.forEach(s => {
@@ -298,31 +309,7 @@ app.get('/api/products', async (req, res) => {
     });
     console.log(`📦 Loaded ${allVariantServices.rows.length} variant services`);
     
-    // Get services table_id
-    const servicesTableResult = await client.execute(`SELECT id FROM table_definitions WHERE name = 'calculation_services' LIMIT 1`);
-    const servicesTableId = servicesTableResult.rows.length > 0 ? servicesTableResult.rows[0].id : null;
-    console.log(`📦 Services table ID: ${servicesTableId}`);
-    
-    // Pre-load all services
-    const allServices = servicesTableId ? await client.execute(`
-      SELECT e.id as entityId,
-        MAX(CASE WHEN a.attribute_name = 'id' THEN a.string_value END) as id,
-        MAX(CASE WHEN a.attribute_name = 'name' THEN a.string_value END) as name,
-        MAX(CASE WHEN a.attribute_name = 'pricingModel' THEN a.string_value END) as pricingModel,
-        MAX(CASE WHEN a.attribute_name = 'unit' THEN a.string_value END) as unit,
-        MAX(CASE WHEN a.attribute_name = 'purchasePrice' THEN a.number_value END) as purchasePrice,
-        MAX(CASE WHEN a.attribute_name = 'salePrice' THEN a.number_value END) as salePrice,
-        MAX(CASE WHEN a.attribute_name = 'baseTimePerUnit' THEN a.number_value END) as baseTimePerUnit
-      FROM entities e
-      JOIN attributes a ON e.id = a.entity_id
-      WHERE e.table_id = '${servicesTableId}'
-      GROUP BY e.id
-    `) : { rows: [] };
-    const servicesMap = new Map();
-    allServices.rows.forEach(s => servicesMap.set(s.id, s));
-    console.log(`📦 Loaded ${allServices.rows.length} services`);
-    
-    // Pre-load all workflows
+    // Get all workflows
     const allWorkflows = await client.execute(`
       SELECT sc.*, tt.name as task_name
       FROM service_checklists sc
@@ -336,14 +323,11 @@ app.get('/api/products', async (req, res) => {
     });
     console.log(`📦 Loaded ${allWorkflows.rows.length} workflow tasks`);
     
-    // Build products with cached data
-    const products = [];
-    
-    for (const p of productsResult.rows) {
+    // Build final products
+    const products = productsRaw.map(p => {
       const variants = JSON.parse(p.variants || '[]');
-      const enrichedVariants = [];
       
-      for (const v of variants) {
+      const enrichedVariants = variants.map(v => {
         const materials = materialsMap.get(v.id) || [];
         const variantServices = variantServicesMap.get(v.id) || [];
         
@@ -351,39 +335,71 @@ app.get('/api/products', async (req, res) => {
           const svc = servicesMap.get(vs.service_id);
           if (!svc) return null;
           
-          const workflow = workflowsMap.get(svc.entityId) || [];
+          const workflow = workflowsMap.get(svc._entityId) || [];
           
           return {
-            ...svc,
+            id: svc.id,
+            name: svc.name,
+            pricingModel: svc.pricingModel,
+            unit: svc.unit,
+            purchasePrice: svc.purchasePrice || 0,
+            salePrice: svc.salePrice || 0,
+            baseTimePerUnit: svc.baseTimePerUnit || 0,
             quantity: vs.quantity || 1,
             workflow
           };
         }).filter(Boolean);
         
-        enrichedVariants.push({
-          ...v,
-          materials,
-          services
-        });
-      }
+        return { ...v, materials, services };
+      });
       
-      products.push({
-        id: p.productId,
+      return {
+        id: p.id,
         name: p.name,
         description: p.description,
         variants: enrichedVariants
-      });
-    }
+      };
+    });
     
-    console.log(`✅ Returning ${products.length} products`);
-    res.json({ products });
+    productsCache = { products, generatedAt: new Date().toISOString() };
+    console.log(`✅ Cache ready: ${products.length} products`);
   } catch (error) {
-    console.error('❌ Error:', error);
-    res.status(500).json({ error: 'Failed to fetch products', details: error.message });
+    console.error('❌ Cache error:', error.message);
+    productsCache = { products: [], error: error.message };
   }
+}
+
+// Get products - serve from cache (instant!)
+app.get('/api/products', (req, res) => {
+  const { token } = req.query;
+  
+  if (token !== SHARE_TOKEN) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+  
+  if (!productsCache) {
+    return res.status(503).json({ error: 'Cache not ready yet, try again in a few seconds' });
+  }
+  
+  res.json(productsCache);
 });
 
-app.listen(PORT, () => {
+// Refresh cache endpoint
+app.post('/api/refresh-cache', async (req, res) => {
+  const { token } = req.query;
+  if (token !== SHARE_TOKEN) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+  
+  await loadProductsCache();
+  res.json({ success: true, productsCount: productsCache?.products?.length || 0 });
+});
+
+// Start server and load cache
+app.listen(PORT, async () => {
   console.log(`🚀 Pricing Review Server running on port ${PORT}`);
+  
+  // Load cache in background
+  loadProductsCache().catch(err => console.error('Cache load failed:', err));
 });
 
