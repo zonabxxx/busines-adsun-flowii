@@ -246,8 +246,18 @@ async function loadProductsCache() {
     const entitiesResult = await client.execute(`SELECT id, table_id FROM entities WHERE table_id IN ('${productsTableId}'${servicesTableId ? `, '${servicesTableId}'` : ''})`);
     console.log(`📦 Found ${entitiesResult.rows.length} entities`);
     
-    const entityIds = entitiesResult.rows.map(r => `'${r.id}'`).join(',');
-    const attrsResult = entityIds ? await client.execute(`SELECT entity_id, attribute_name, string_value, number_value, json_value FROM attributes WHERE entity_id IN (${entityIds})`) : { rows: [] };
+    // Process entities in smaller batches to avoid timeout
+    const allAttrs = [];
+    const batchSize = 5;
+    for (let i = 0; i < entitiesResult.rows.length; i += batchSize) {
+      const batch = entitiesResult.rows.slice(i, i + batchSize);
+      const batchIds = batch.map(r => `'${r.id}'`).join(',');
+      if (batchIds) {
+        const batchResult = await client.execute(`SELECT entity_id, attribute_name, string_value, number_value, json_value FROM attributes WHERE entity_id IN (${batchIds})`);
+        allAttrs.push(...batchResult.rows);
+      }
+    }
+    const attrsResult = { rows: allAttrs };
     console.log(`📦 Found ${attrsResult.rows.length} attributes`);
     
     // Build entity map
